@@ -453,7 +453,18 @@ class VolumeControl(ActionBase):
 
         # Fonts
         font_path = settings.get("font_path", "")
-        title_font_size = int(settings.get("title_font_size", 14))
+        
+        # Extract title font size from settings["font_name"] if set by the font selection tool
+        font_name = settings.get("font_name", "")
+        title_font_size = 14
+        if font_name:
+            import re
+            match = re.search(r'\s+(\d+)$', font_name.strip())
+            if match:
+                title_font_size = int(match.group(1))
+        else:
+            title_font_size = int(settings.get("title_font_size", 14))
+            
         vol_font_size = 28
         
         font_file = None
@@ -650,11 +661,6 @@ class VolumeControl(ActionBase):
             return settings.get("font_path", "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf")
         return "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf"
 
-    def get_title_font_size(self) -> int:
-        settings = self.get_settings()
-        if settings is not None:
-            return int(settings.get("title_font_size", 13))
-        return 13
 
     def update_device_dropdown(self):
         settings = self.get_settings() or {}
@@ -813,27 +819,6 @@ class VolumeControl(ActionBase):
         self.choose_font_button.set_valign(Gtk.Align.CENTER)
         self.font_row.add_suffix(self.choose_font_button)
 
-        # 9. Title Text Size slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
-        self.title_size_row = Adw.PreferencesRow()
-        self.title_size_row.set_activatable(False)
-        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        title_box.set_margin_start(12)
-        title_box.set_margin_end(12)
-        title_box.set_margin_top(8)
-        title_box.set_margin_bottom(8)
-        title_label = Gtk.Label.new("Title Text Size")
-        title_label.set_xalign(0.0)
-        title_box.append(title_label)
-        
-        current_title_size = float(self.get_title_font_size())
-        self.title_size_adj = Gtk.Adjustment.new(current_title_size, 8.0, 24.0, 1.0, 2.0, 0.0)
-        self.title_size_slider = Gtk.Scale.new(Gtk.Orientation.HORIZONTAL, self.title_size_adj)
-        self.title_size_slider.set_draw_value(True)
-        self.title_size_slider.set_hexpand(True)
-        self.title_size_slider.set_valign(Gtk.Align.CENTER)
-        title_box.append(self.title_size_slider)
-        self.title_size_row.set_child(title_box)
-        
         # Connect changes to save settings
         self.custom_name_row.connect("notify::text", self.on_custom_name_changed)
         self.type_selector.connect("notify::selected-item", self.on_device_type_changed)
@@ -845,7 +830,6 @@ class VolumeControl(ActionBase):
         self.scale_slider.connect("value-changed", self.on_scale_changed)
         self.font_row.connect("activated", self.on_choose_font_clicked)
         self.choose_font_button.connect("clicked", self.on_choose_font_clicked)
-        self.title_size_slider.connect("value-changed", self.on_title_size_changed)
         
         # Update clear button sensitivity
         icon_path = settings.get("custom_icon", "")
@@ -854,11 +838,10 @@ class VolumeControl(ActionBase):
         # Create Text (Custom Display Name) Expander Row
         self.text_expander = Adw.ExpanderRow(
             title="Custom Display Name",
-            subtitle="Configure display name, font, and size"
+            subtitle="Configure display name and font"
         )
         self.text_expander.add_row(self.custom_name_row)
         self.text_expander.add_row(self.font_row)
-        self.text_expander.add_row(self.title_size_row)
 
         # Create Icon Expander Row
         self.icon_expander = Adw.ExpanderRow(
@@ -1067,8 +1050,3 @@ class VolumeControl(ActionBase):
         dialog.connect("response", on_response)
         dialog.show()
 
-    def on_title_size_changed(self, slider):
-        settings = self.get_settings() or {}
-        settings["title_font_size"] = int(slider.get_value())
-        self.set_settings(settings)
-        self.update_ui_rendering()
