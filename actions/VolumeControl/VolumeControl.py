@@ -392,25 +392,35 @@ class VolumeControl(ActionBase):
                 title_w = len(title_text) * 7
             draw.text((center_x - title_w // 2, 18 - 7), title_text, font=font_title, fill=(220, 222, 230, 255))
         
-        # 3. Dial Geometry (Restored to manual knob core layout)
-        cx, cy = 100, 92
-        r_tick_start, r_tick_end = 55, 63
-        r_arc = 46
-        r_core_outer = 37
-        r_core_inner = 34
-        r_pt_start, r_pt_end = 16, 29
+        # 3. Dial Geometry (Interpreted to match rect1.png: Width = 90px, Height = 44px)
+        cx, cy = 100, 96
+        
+        # Outer Knob Core dimensions (90px wide, 44px high)
+        rx_outer, ry_outer = 45, 44
+        # Inner Knob Core dimensions (Thickness = 3px)
+        rx_inner, ry_inner = 42, 41
+        
+        # Gauge Arc dimensions (9px outside the knob core)
+        rx_arc, ry_arc = 54, 53
+        
+        # Ticks start and end
+        rx_tick_start, ry_tick_start = 62, 61
+        rx_tick_end, ry_tick_end = 70, 69
+        
+        # Pointer dimensions
+        r_pt_start, r_pt_end = 16, 36
         
         # Draw Ticks (arranged semi-circularly from 180 to 360 degrees)
         for tick_angle in range(180, 361, 18):
             rad = math.radians(tick_angle)
-            x1 = cx + r_tick_start * math.cos(rad)
-            y1 = cy + r_tick_start * math.sin(rad)
-            x2 = cx + r_tick_end * math.cos(rad)
-            y2 = cy + r_tick_end * math.sin(rad)
+            x1 = cx + rx_tick_start * math.cos(rad)
+            y1 = cy + ry_tick_start * math.sin(rad)
+            x2 = cx + rx_tick_end * math.cos(rad)
+            y2 = cy + ry_tick_end * math.sin(rad)
             draw.line([(x1, y1), (x2, y2)], fill=(130, 132, 140, 255), width=2)
             
         # Draw Gauge Track (inactive - dark background arc)
-        bbox = [(cx - r_arc, cy - r_arc), (cx + r_arc, cy + r_arc)]
+        bbox = [(cx - rx_arc, cy - ry_arc), (cx + rx_arc, cy + ry_arc)]
         draw.arc(bbox, start=180, end=360, fill=(38, 38, 42, 255), width=7)
         
         # Draw Active Gauge Segment
@@ -420,7 +430,6 @@ class VolumeControl(ActionBase):
             # Segment-by-segment gradient drawing
             for angle in range(180, int(end_angle)):
                 pct = (angle - 180) / 180.0
-                # Green (0, 180, 0) to Yellow (235, 220, 0) to Orange/Red (255, 60, 0)
                 if pct < 0.5:
                     t = pct / 0.5
                     r_col = int(0 + 235 * t)
@@ -435,9 +444,9 @@ class VolumeControl(ActionBase):
                 draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
                 
         # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
-        draw.ellipse([(cx - r_core_outer, cy - r_core_outer), (cx + r_core_outer, cy + r_core_outer)], fill=(18, 18, 20, 255))
+        draw.ellipse([(cx - rx_outer, cy - ry_outer), (cx + rx_outer, cy + ry_outer)], fill=(18, 18, 20, 255))
         # Inner circle of the core
-        draw.ellipse([(cx - r_core_inner, cy - r_core_inner), (cx + r_core_inner, cy + r_core_inner)], fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
+        draw.ellipse([(cx - rx_inner, cy - ry_inner), (cx + rx_inner, cy + ry_inner)], fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
         
         # 5. Draw Pointer line on top of the knob
         pointer_angle = end_angle
