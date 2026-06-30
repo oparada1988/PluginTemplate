@@ -218,11 +218,21 @@ class VolumeControl(ActionBase):
                 draw.arc([(spk_x - 3, spk_y - 4), (spk_x + 23, spk_y + 18)], start=-45, end=45, fill=wave_color, width=2)
             
         # Fonts
-        font_path_regular = "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"
-        font_path_bold = "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf"
+        font_path = settings.get("font_path", "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf")
+        title_font_size = int(settings.get("title_font_size", 13))
+        vol_font_size = int(settings.get("vol_font_size", 18))
         try:
-            font_title = ImageFont.truetype(font_path_bold, 13)
-            font_vol = ImageFont.truetype(font_path_bold, 18)
+            if font_path and os.path.exists(font_path):
+                font_title = ImageFont.truetype(font_path, title_font_size)
+                font_vol = ImageFont.truetype(font_path, vol_font_size)
+            else:
+                fallback_path = "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf"
+                if os.path.exists(fallback_path):
+                    font_title = ImageFont.truetype(fallback_path, title_font_size)
+                    font_vol = ImageFont.truetype(fallback_path, vol_font_size)
+                else:
+                    font_title = ImageFont.load_default()
+                    font_vol = ImageFont.load_default()
         except Exception:
             font_title = ImageFont.load_default()
             font_vol = ImageFont.load_default()
@@ -301,6 +311,24 @@ class VolumeControl(ActionBase):
         
         return img
 
+    def get_font_path(self) -> str:
+        settings = self.get_settings()
+        if settings is not None:
+            return settings.get("font_path", "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf")
+        return "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf"
+
+    def get_title_font_size(self) -> int:
+        settings = self.get_settings()
+        if settings is not None:
+            return int(settings.get("title_font_size", 13))
+        return 13
+
+    def get_vol_font_size(self) -> int:
+        settings = self.get_settings()
+        if settings is not None:
+            return int(settings.get("vol_font_size", 18))
+        return 18
+
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         # 1. Mixer name selector
         self.mixer_row = Adw.EntryRow(
@@ -357,6 +385,43 @@ class VolumeControl(ActionBase):
         self.scale_slider.set_valign(Gtk.Align.CENTER)
         self.scale_slider.set_size_request(150, -1)
         self.scale_row.add_suffix(self.scale_slider)
+
+        # 5. Font Path entry row with native file chooser button
+        self.font_row = Adw.EntryRow(
+            title="Custom Font File (*.ttf)",
+            text=self.get_font_path()
+        )
+        self.choose_font_button = Gtk.Button.new_from_icon_name("document-open-symbolic")
+        self.choose_font_button.set_valign(Gtk.Align.CENTER)
+        self.font_row.add_suffix(self.choose_font_button)
+
+        # 6. Title Text Size slider
+        self.title_size_row = Adw.ActionRow(
+            title="Title Text Size",
+            subtitle="Change the channel label font size"
+        )
+        current_title_size = float(self.get_title_font_size())
+        self.title_size_adj = Gtk.Adjustment.new(current_title_size, 8.0, 24.0, 1.0, 2.0, 0.0)
+        self.title_size_slider = Gtk.Scale.new(Gtk.Orientation.HORIZONTAL, self.title_size_adj)
+        self.title_size_slider.set_draw_value(True)
+        self.title_size_slider.set_hexpand(True)
+        self.title_size_slider.set_valign(Gtk.Align.CENTER)
+        self.title_size_slider.set_size_request(150, -1)
+        self.title_size_row.add_suffix(self.title_size_slider)
+
+        # 7. Volume Text Size slider
+        self.vol_size_row = Adw.ActionRow(
+            title="Volume Value Size",
+            subtitle="Change the percentage text font size"
+        )
+        current_vol_size = float(self.get_vol_font_size())
+        self.vol_size_adj = Gtk.Adjustment.new(current_vol_size, 10.0, 32.0, 1.0, 2.0, 0.0)
+        self.vol_size_slider = Gtk.Scale.new(Gtk.Orientation.HORIZONTAL, self.vol_size_adj)
+        self.vol_size_slider.set_draw_value(True)
+        self.vol_size_slider.set_hexpand(True)
+        self.vol_size_slider.set_valign(Gtk.Align.CENTER)
+        self.vol_size_slider.set_size_request(150, -1)
+        self.vol_size_row.add_suffix(self.vol_size_slider)
         
         # Connect changes to save settings
         self.mixer_row.connect("notify::text", self.on_mixer_changed)
@@ -364,12 +429,24 @@ class VolumeControl(ActionBase):
         self.choose_icon_button.connect("clicked", self.on_choose_icon_clicked)
         self.clear_icon_button.connect("clicked", self.on_clear_icon_clicked)
         self.scale_slider.connect("value-changed", self.on_scale_changed)
+        self.font_row.connect("notify::text", self.on_font_path_changed)
+        self.choose_font_button.connect("clicked", self.on_choose_font_clicked)
+        self.title_size_slider.connect("value-changed", self.on_title_size_changed)
+        self.vol_size_slider.connect("value-changed", self.on_vol_size_changed)
         
         # Update clear button sensitivity
         icon_path = settings.get("custom_icon", "")
         self.clear_icon_button.set_sensitive(bool(icon_path))
         
-        return [self.mixer_row, self.step_selector, self.icon_row, self.scale_row]
+        return [
+            self.mixer_row,
+            self.step_selector,
+            self.icon_row,
+            self.scale_row,
+            self.font_row,
+            self.title_size_row,
+            self.vol_size_row
+        ]
 
     def on_mixer_changed(self, entry, *args):
         settings = self.get_settings()
@@ -425,5 +502,63 @@ class VolumeControl(ActionBase):
         self.set_settings(settings)
         
         self.last_volume = -1  # force redraw
+        self.last_mute = None
+        self.update_volume_status()
+
+    def on_font_path_changed(self, entry, *args):
+        settings = self.get_settings()
+        if settings is None:
+            settings = {}
+        settings["font_path"] = entry.get_text()
+        self.set_settings(settings)
+        self.last_volume = -1
+        self.last_mute = None
+        self.update_volume_status()
+
+    def update_font_setting(self, path):
+        self.font_row.set_text(path)
+        settings = self.get_settings() or {}
+        settings["font_path"] = path
+        self.set_settings(settings)
+        self.last_volume = -1
+        self.last_mute = None
+        self.update_volume_status()
+
+    def on_choose_font_clicked(self, button):
+        dialog = Gtk.FileChooserNative.new(
+            title="Select Font File",
+            parent=None,
+            action=Gtk.FileChooserAction.OPEN,
+            accept_label="Open",
+            cancel_label="Cancel"
+        )
+        filter_ttf = Gtk.FileFilter.new()
+        filter_ttf.set_name("Font files (*.ttf, *.otf)")
+        filter_ttf.add_pattern("*.ttf")
+        filter_ttf.add_pattern("*.otf")
+        dialog.add_filter(filter_ttf)
+        
+        def on_response(dialog, response_id):
+            if response_id == Gtk.ResponseType.ACCEPT:
+                file_path = dialog.get_file().get_path()
+                GLib.idle_add(self.update_font_setting, file_path)
+            dialog.destroy()
+            
+        dialog.connect("response", on_response)
+        dialog.show()
+
+    def on_title_size_changed(self, slider):
+        settings = self.get_settings() or {}
+        settings["title_font_size"] = int(slider.get_value())
+        self.set_settings(settings)
+        self.last_volume = -1
+        self.last_mute = None
+        self.update_volume_status()
+
+    def on_vol_size_changed(self, slider):
+        settings = self.get_settings() or {}
+        settings["vol_font_size"] = int(slider.get_value())
+        self.set_settings(settings)
+        self.last_volume = -1
         self.last_mute = None
         self.update_volume_status()
