@@ -151,8 +151,7 @@ class VolumeControl(ActionBase):
         self.knob_image = None
         self.peak_monitor = VolumePeakMonitor()
         self.tick_timer_id = 0
-        self.tick_counter = 0
-        
+        self.last_poll_time = 0.0
         self.last_drawn_volume = -1
         self.last_drawn_mute = None
         self.last_drawn_peak = -1.0
@@ -163,8 +162,10 @@ class VolumeControl(ActionBase):
         # Load initial status once (in a background thread to avoid GTK block)
         threading.Thread(target=self._initial_load_status, daemon=True).start()
         
-        # Start GLib tick timer (40ms / 25 FPS) for real-time peak meter and polling
-        self.tick_timer_id = GLib.timeout_add(40, self.on_tick_update)
+        # Start GLib tick timer based on configured FPS for real-time peak meter
+        fps = self.get_meter_fps()
+        interval = int(1000 / fps)
+        self.tick_timer_id = GLib.timeout_add(interval, self.on_tick_update)
 
     def _initial_load_status(self):
         settings = self.get_settings() or {}
@@ -232,6 +233,16 @@ class VolumeControl(ActionBase):
                 return 5
         return 5
 
+    def get_meter_fps(self) -> int:
+        settings = self.get_settings()
+        if settings is not None:
+            val = settings.get("meter_fps", "25 FPS")
+            try:
+                return int(val.split()[0])
+            except ValueError:
+                return 25
+        return 25
+
     def get_configured_device_id(self) -> str:
         settings = self.get_settings() or {}
         dev_id = settings.get("pipewire_device_id", "@DEFAULT_AUDIO_SINK@")
@@ -265,9 +276,11 @@ class VolumeControl(ActionBase):
             
             self.update_ui_rendering(peak)
             
-        self.tick_counter += 1
-        if self.tick_counter >= 12:
-            self.tick_counter = 0
+        # Poll system volume changes at a fixed 500ms interval
+        import time
+        now = time.time()
+        if now - self.last_poll_time >= 0.5:
+            self.last_poll_time = now
             threading.Thread(target=self._poll_system_volume_bg, daemon=True).start()
             
         return True
@@ -724,7 +737,24 @@ class VolumeControl(ActionBase):
         else:
             self.step_selector.set_selected(2) # Default to 5%
             
-        # 5. Custom Icon selection
+        # 5. FPS selection combo row
+        self.fps_model = Gtk.StringList()
+        fps_options = ["1 FPS", "5 FPS", "10 FPS", "15 FPS", "20 FPS", "25 FPS"]
+        for opt in fps_options:
+            self.fps_model.append(opt)
+            
+        self.fps_selector = Adw.ComboRow(
+            model=self.fps_model,
+            title="Meter Update Rate (FPS)",
+            subtitle="Higher FPS yields smoother animations but increases CPU usage"
+        )
+        current_fps = f"{self.get_meter_fps()} FPS"
+        if current_fps in fps_options:
+            self.fps_selector.set_selected(fps_options.index(current_fps))
+        else:
+            self.fps_selector.set_selected(5) # Default to 25 FPS
+
+        # 6. Custom Icon selection
         self.icon_row = Adw.ActionRow(
             title="Custom Icon",
             subtitle="Select a custom icon to display"
@@ -738,7 +768,7 @@ class VolumeControl(ActionBase):
         self.clear_icon_button.set_valign(Gtk.Align.CENTER)
         self.icon_row.add_suffix(self.clear_icon_button)
         
-        # 6. Icon Scale slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
+        # 7. Icon Scale slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
         self.scale_row = Adw.PreferencesRow()
         self.scale_row.set_activatable(False)
         scale_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -759,7 +789,7 @@ class VolumeControl(ActionBase):
         scale_box.append(self.scale_slider)
         self.scale_row.set_child(scale_box)
 
-        # 7. Custom Font File (*.ttf) entry row showing basename, non-editable
+        # 8. Custom Font File (*.ttf) entry row showing basename, non-editable
         self.font_row = Adw.EntryRow(
             title="Custom Font File (*.ttf)",
             text=os.path.basename(self.get_font_path())
@@ -769,7 +799,7 @@ class VolumeControl(ActionBase):
         self.choose_font_button.set_valign(Gtk.Align.CENTER)
         self.font_row.add_suffix(self.choose_font_button)
 
-        # 8. Title Text Size slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
+        # 9. Title Text Size slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
         self.title_size_row = Adw.PreferencesRow()
         self.title_size_row.set_activatable(False)
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -795,6 +825,7 @@ class VolumeControl(ActionBase):
         self.type_selector.connect("notify::selected-item", self.on_device_type_changed)
         self.pw_device_selector.connect("notify::selected-item", self.on_pw_device_changed)
         self.step_selector.connect("notify::selected-item", self.on_step_changed)
+        self.fps_selector.connect("notify::selected-item", self.on_fps_changed)
         self.choose_icon_button.connect("clicked", self.on_choose_icon_clicked)
         self.clear_icon_button.connect("clicked", self.on_clear_icon_clicked)
         self.scale_slider.connect("value-changed", self.on_scale_changed)
@@ -811,6 +842,7 @@ class VolumeControl(ActionBase):
             self.type_selector,
             self.pw_device_selector,
             self.step_selector,
+            self.fps_selector,
             self.icon_row,
             self.scale_row,
             self.font_row,
@@ -868,6 +900,23 @@ class VolumeControl(ActionBase):
         if selected_item is not None:
             settings["step_size"] = selected_item.get_string()
             self.set_settings(settings)
+
+    def on_fps_changed(self, combo, *args):
+        settings = self.get_settings() or {}
+        selected_item = combo.get_selected_item()
+        if selected_item is not None:
+            settings["meter_fps"] = selected_item.get_string()
+            self.set_settings(settings)
+            
+            # Restart GLib timer with the new update interval
+            if self.tick_timer_id:
+                GLib.source_remove(self.tick_timer_id)
+                self.tick_timer_id = 0
+            
+            if self.running:
+                fps = self.get_meter_fps()
+                interval = int(1000 / fps)
+                self.tick_timer_id = GLib.timeout_add(interval, self.on_tick_update)
 
     def on_choose_icon_clicked(self, button):
         settings = self.get_settings() or {}
