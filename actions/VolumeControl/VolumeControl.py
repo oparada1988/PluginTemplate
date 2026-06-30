@@ -294,8 +294,8 @@ class VolumeControl(ActionBase):
             self.last_mute = mute
             GLib.idle_add(self.update_ui_rendering)
 
-    def update_ui_rendering(self, peak: float = 0.0):
-        if not self.get_is_present():
+    def update_ui_rendering(self, peak: float = 0.0, force: bool = False):
+        if not force and not self.get_is_present():
             return
         
         self.last_drawn_volume = self.current_volume
@@ -485,7 +485,6 @@ class VolumeControl(ActionBase):
                 if os.path.exists(path):
                     font_file = path
                     break
-                    
         vol_font_size = 28
                     
         try:
@@ -871,7 +870,7 @@ class VolumeControl(ActionBase):
         settings = self.get_settings() or {}
         settings["custom_name"] = entry.get_text()
         self.set_settings(settings)
-        self.update_ui_rendering()
+        self.update_ui_rendering(force=True)
 
     def on_device_type_changed(self, combo, *args):
         selected_index = combo.get_selected()
@@ -896,7 +895,7 @@ class VolumeControl(ActionBase):
         
         # Restart monitor and draw
         self.restart_peak_monitor()
-        self.update_ui_rendering()
+        self.update_ui_rendering(force=True)
 
     def on_pw_device_changed(self, combo, *args):
         if getattr(self, "_updating_dropdown", False):
@@ -910,7 +909,7 @@ class VolumeControl(ActionBase):
             self.set_settings(settings)
             
             self.restart_peak_monitor()
-            self.update_ui_rendering()
+            self.update_ui_rendering(force=True)
 
     def on_step_changed(self, combo, *args):
         settings = self.get_settings() or {}
@@ -948,7 +947,7 @@ class VolumeControl(ActionBase):
             self.set_settings(settings)
             
             self.clear_icon_button.set_sensitive(True)
-            self.update_ui_rendering()
+            self.update_ui_rendering(force=True)
             
         GLib.idle_add(gl.app.let_user_select_asset, current_val, on_select_callback)
 
@@ -958,13 +957,13 @@ class VolumeControl(ActionBase):
         self.set_settings(settings)
         
         self.clear_icon_button.set_sensitive(False)
-        self.update_ui_rendering()
+        self.update_ui_rendering(force=True)
 
     def on_scale_changed(self, slider):
         settings = self.get_settings() or {}
         settings["icon_scale"] = slider.get_value()
         self.set_settings(settings)
-        self.update_ui_rendering()
+        self.update_ui_rendering(force=True)
 
     def font_name_to_path(self, font_name: str) -> str:
         import re
@@ -1027,7 +1026,7 @@ class VolumeControl(ActionBase):
             
         self.set_settings(settings)
         self.font_row.set_subtitle(font_name)
-        self.update_ui_rendering()
+        self.update_ui_rendering(force=True)
 
     def on_choose_font_clicked(self, *args):
         parent_window = None
