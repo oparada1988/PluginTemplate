@@ -161,6 +161,14 @@ class VolumeControl(ActionBase):
         self.tick_timer_id = GLib.timeout_add(40, self.on_tick_update)
 
     def _initial_load_status(self):
+        settings = self.get_settings() or {}
+        if not settings.get("device_type"):
+            settings["device_type"] = "sink"
+        if not settings.get("pipewire_device_id"):
+            settings["pipewire_device_id"] = "@DEFAULT_AUDIO_SINK@"
+            settings["pipewire_device_name"] = "Default Sink"
+            self.set_settings(settings)
+            
         vol, mute = self.get_system_volume_status()
         self.current_volume = vol
         self.last_mute = mute
@@ -611,8 +619,45 @@ class VolumeControl(ActionBase):
             return int(settings.get("title_font_size", 13))
         return 13
 
+    def update_device_dropdown(self):
+        settings = self.get_settings() or {}
+        dtype = settings.get("device_type", "sink")
+        
+        self.pw_devices_map = []
+        if dtype == "sink":
+            self.pw_devices_map.append(("@DEFAULT_AUDIO_SINK@", "Default Output (Sink)"))
+            sinks, _ = self.get_pipewire_devices()
+            for s_id, s_name in sinks:
+                self.pw_devices_map.append((s_id, s_name))
+        else:
+            self.pw_devices_map.append(("@DEFAULT_AUDIO_SOURCE@", "Default Input (Source)"))
+            _, sources = self.get_pipewire_devices()
+            for s_id, s_name in sources:
+                self.pw_devices_map.append((s_id, s_name))
+                
+        self.pw_device_model = Gtk.StringList()
+        for pw_id, display_name in self.pw_devices_map:
+            self.pw_device_model.append(display_name)
+            
+        self.pw_device_selector.set_model(self.pw_device_model)
+        
+        current_pw_id = settings.get("pipewire_device_id")
+        if not current_pw_id:
+            current_pw_id = "@DEFAULT_AUDIO_SINK@" if dtype == "sink" else "@DEFAULT_AUDIO_SOURCE@"
+            
+        selected_index = 0
+        for idx, (pw_id, display_name) in enumerate(self.pw_devices_map):
+            if pw_id == current_pw_id:
+                selected_index = idx
+                break
+                
+        self._updating_dropdown = True
+        self.pw_device_selector.set_selected(selected_index)
+        self._updating_dropdown = False
+
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         settings = self.get_settings() or {}
+        dtype = settings.get("device_type", "sink")
 
         # 1. Custom Name Row
         self.custom_name_row = Adw.EntryRow(
@@ -620,35 +665,27 @@ class VolumeControl(ActionBase):
             text=settings.get("custom_name", "")
         )
 
-        # 2. PipeWire Devices Selector
-        self.pw_devices_map = [
-            ("@DEFAULT_AUDIO_SINK@", "Default Sink"),
-            ("@DEFAULT_AUDIO_SOURCE@", "Default Source")
-        ]
-        sinks, sources = self.get_pipewire_devices()
-        for s_id, s_name in sinks:
-            self.pw_devices_map.append((s_id, f"Sink: {s_name}"))
-        for s_id, s_name in sources:
-            self.pw_devices_map.append((s_id, f"Source: {s_name}"))
-
-        self.pw_device_model = Gtk.StringList()
-        for pw_id, display_name in self.pw_devices_map:
-            self.pw_device_model.append(display_name)
-            
-        self.pw_device_selector = Adw.ComboRow(
-            model=self.pw_device_model,
-            title="PipeWire Device",
-            subtitle="Select the output (sink) or input (source) device"
+        # 2. Device Type Selector
+        self.type_model = Gtk.StringList()
+        self.type_model.append("Output (sink)")
+        self.type_model.append("Input (source)")
+        self.type_selector = Adw.ComboRow(
+            model=self.type_model,
+            title="Device Type",
+            subtitle="Select Output (speaker/headphones) or Input (mic)"
         )
-        current_pw_id = settings.get("pipewire_device_id", "@DEFAULT_AUDIO_SINK@")
-        selected_index = 0
-        for idx, (pw_id, display_name) in enumerate(self.pw_devices_map):
-            if pw_id == current_pw_id:
-                selected_index = idx
-                break
-        self.pw_device_selector.set_selected(selected_index)
+        self.type_selector.set_selected(0 if dtype == "sink" else 1)
+
+        # 3. PipeWire Device Selector ComboRow
+        self.pw_device_selector = Adw.ComboRow(
+            title="PipeWire Device",
+            subtitle="Select the specific audio device"
+        )
         
-        # 3. Step size selector
+        # Populate initial list
+        self.update_device_dropdown()
+        
+        # 4. Step size selector
         self.step_model = Gtk.StringList()
         step_sizes = ["1%", "2%", "5%", "10%"]
         for size in step_sizes:
@@ -660,14 +697,13 @@ class VolumeControl(ActionBase):
             subtitle="Volume change per dial tick"
         )
         
-        # Set default selection
         current_step = f"{self.get_step_size()}%"
         if current_step in step_sizes:
             self.step_selector.set_selected(step_sizes.index(current_step))
         else:
             self.step_selector.set_selected(2) # Default to 5%
             
-        # 4. Custom Icon selection
+        # 5. Custom Icon selection
         self.icon_row = Adw.ActionRow(
             title="Custom Icon",
             subtitle="Select a custom icon to display"
@@ -681,7 +717,7 @@ class VolumeControl(ActionBase):
         self.clear_icon_button.set_valign(Gtk.Align.CENTER)
         self.icon_row.add_suffix(self.clear_icon_button)
         
-        # 5. Icon Scale slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
+        # 6. Icon Scale slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
         self.scale_row = Adw.PreferencesRow()
         self.scale_row.set_activatable(False)
         scale_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -702,7 +738,7 @@ class VolumeControl(ActionBase):
         scale_box.append(self.scale_slider)
         self.scale_row.set_child(scale_box)
 
-        # 6. Custom Font File (*.ttf) entry row showing basename, non-editable
+        # 7. Custom Font File (*.ttf) entry row showing basename, non-editable
         self.font_row = Adw.EntryRow(
             title="Custom Font File (*.ttf)",
             text=os.path.basename(self.get_font_path())
@@ -712,7 +748,7 @@ class VolumeControl(ActionBase):
         self.choose_font_button.set_valign(Gtk.Align.CENTER)
         self.font_row.add_suffix(self.choose_font_button)
 
-        # 7. Title Text Size slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
+        # 8. Title Text Size slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
         self.title_size_row = Adw.PreferencesRow()
         self.title_size_row.set_activatable(False)
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -735,6 +771,7 @@ class VolumeControl(ActionBase):
         
         # Connect changes to save settings
         self.custom_name_row.connect("notify::text", self.on_custom_name_changed)
+        self.type_selector.connect("notify::selected-item", self.on_device_type_changed)
         self.pw_device_selector.connect("notify::selected-item", self.on_pw_device_changed)
         self.step_selector.connect("notify::selected-item", self.on_step_changed)
         self.choose_icon_button.connect("clicked", self.on_choose_icon_clicked)
@@ -750,6 +787,7 @@ class VolumeControl(ActionBase):
         
         return [
             self.custom_name_row,
+            self.type_selector,
             self.pw_device_selector,
             self.step_selector,
             self.icon_row,
@@ -764,7 +802,29 @@ class VolumeControl(ActionBase):
         self.set_settings(settings)
         self.update_ui_rendering()
 
+    def on_device_type_changed(self, combo, *args):
+        selected_index = combo.get_selected()
+        new_type = "sink" if selected_index == 0 else "source"
+        
+        settings = self.get_settings() or {}
+        settings["device_type"] = new_type
+        
+        # Reset default device ID based on new type
+        new_default = "@DEFAULT_AUDIO_SINK@" if new_type == "sink" else "@DEFAULT_AUDIO_SOURCE@"
+        settings["pipewire_device_id"] = new_default
+        settings["pipewire_device_name"] = "Default Output" if new_type == "sink" else "Default Input"
+        self.set_settings(settings)
+        
+        # Rebuild the Device Selection dropdown items
+        self.update_device_dropdown()
+        
+        # Restart monitor and draw
+        self.restart_peak_monitor()
+        self.update_ui_rendering()
+
     def on_pw_device_changed(self, combo, *args):
+        if getattr(self, "_updating_dropdown", False):
+            return
         selected_index = combo.get_selected()
         if 0 <= selected_index < len(self.pw_devices_map):
             pw_id, display_name = self.pw_devices_map[selected_index]
