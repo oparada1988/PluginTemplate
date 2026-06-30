@@ -24,6 +24,8 @@ class VolumeControl(ActionBase):
         self.last_volume = -1
         self.last_mute = None
         self.poll_thread = None
+        self.bg_image = None
+        self.knob_image = None
 
     def on_ready(self) -> None:
         self.running = True
@@ -131,13 +133,22 @@ class VolumeControl(ActionBase):
             GLib.idle_add(self.set_media, img)
 
     def generate_volume_image(self, volume: int, is_muted: bool) -> Image.Image:
-        # Stream Deck + screen segments are 200x100 pixels
         width, height = 200, 100
-        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
         
-        # 1. Background (solid premium dark charcoal, matching g19.png)
-        draw.rectangle([(0, 0), (width, height)], fill=(28, 28, 28, 255))
+        # 1. Load Background Image (lazily cached)
+        if self.bg_image is None:
+            bg_path = os.path.join(self.plugin_base.PATH, "assets", "background-volume.png")
+            try:
+                self.bg_image = Image.open(bg_path).convert("RGBA")
+            except Exception:
+                pass
+                
+        if self.bg_image is not None:
+            img = self.bg_image.copy()
+        else:
+            img = Image.new("RGBA", (width, height), (28, 28, 28, 255))
+            
+        draw = ImageDraw.Draw(img)
         
         # 2. Header
         # Speaker Icon (custom slate-blue speaker with cyan/blue waves)
@@ -188,12 +199,10 @@ class VolumeControl(ActionBase):
         draw.text((188 - text_w, 5), vol_text, font=font_vol, fill=vol_color)
         
         # 3. Dial Geometry
-        cx, cy = 100, 92
-        r_tick_start, r_tick_end = 55, 63
-        r_arc = 46
-        r_core_outer = 37
-        r_core_inner = 34
-        r_pt_start, r_pt_end = 16, 29
+        cx, cy = 100, 100
+        r_tick_start, r_tick_end = 56, 64
+        r_arc = 48
+        r_pt_start, r_pt_end = 20, 42
         
         # Draw Ticks (arranged semi-circularly from 180 to 360 degrees)
         for tick_angle in range(180, 361, 18):
@@ -229,12 +238,24 @@ class VolumeControl(ActionBase):
                     
                 draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
                 
-        # Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
-        draw.ellipse([(cx - r_core_outer, cy - r_core_outer), (cx + r_core_outer, cy + r_core_outer)], fill=(18, 18, 20, 255))
-        # Inner circle of the core
-        draw.ellipse([(cx - r_core_inner, cy - r_core_inner), (cx + r_core_inner, cy + r_core_inner)], fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
+        # 4. Load & Paste custom Knob image (lazily cached)
+        if self.knob_image is None:
+            knob_path = os.path.join(self.plugin_base.PATH, "assets", "knob.png")
+            try:
+                self.knob_image = Image.open(knob_path).convert("RGBA")
+            except Exception:
+                pass
+                
+        if self.knob_image is not None:
+            img.paste(self.knob_image, (50, 50), self.knob_image)
+        else:
+            # Fallback to drawing manual knob core
+            r_core_outer = 37
+            r_core_inner = 34
+            draw.ellipse([(cx - r_core_outer, cy - r_core_outer), (cx + r_core_outer, cy + r_core_outer)], fill=(18, 18, 20, 255))
+            draw.ellipse([(cx - r_core_inner, cy - r_core_inner), (cx + r_core_inner, cy + r_core_inner)], fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
         
-        # Draw Pointer
+        # 5. Draw Pointer line on top of the knob
         pointer_angle = end_angle
         rad_pt = math.radians(pointer_angle)
         xp1 = cx + r_pt_start * math.cos(rad_pt)
