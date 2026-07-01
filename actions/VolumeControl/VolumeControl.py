@@ -263,7 +263,8 @@ class VolumeControl(ActionBase):
             return False
             
         peak = self.peak_monitor.get_peak()
-        peak = max(0.0, min(1.0, peak))
+        # Apply a 1.5x gain boost to ensure standard audio peaks reach the red/orange zone at 100% volume
+        peak = max(0.0, min(1.0, peak * 1.5))
         if peak < 0.04:
             peak = 0.0
         
