@@ -823,8 +823,7 @@ class VolumeControl(ActionBase):
         self.type_model.append("Input (source)")
         self.type_selector = Adw.ComboRow(
             model=self.type_model,
-            title="Device Type",
-            subtitle="Select Output (speaker/headphones) or Input (mic)"
+            title="Device Type"
         )
         self.type_selector.set_selected(0 if dtype == "sink" else 1)
 
