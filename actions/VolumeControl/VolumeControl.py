@@ -829,8 +829,7 @@ class VolumeControl(ActionBase):
 
         # 3. PipeWire Device Selector ComboRow
         self.pw_device_selector = Adw.ComboRow(
-            title="PipeWire Device",
-            subtitle="Select the specific audio device"
+            title="PipeWire Device"
         )
         
         # Populate initial list
@@ -844,8 +843,7 @@ class VolumeControl(ActionBase):
             
         self.step_selector = Adw.ComboRow(
             model=self.step_model,
-            title="Volume Step Size",
-            subtitle="Volume change per dial tick"
+            title="Volume Step Size"
         )
         
         current_step = f"{self.get_step_size()}%"
@@ -856,16 +854,14 @@ class VolumeControl(ActionBase):
             
         # 5. Live Meter Toggle Row
         self.live_meter_row = Adw.SwitchRow(
-            title="Live Peak Meter",
-            subtitle="Enable real-time audio peak visualization"
+            title="Live Peak Meter"
         )
         is_live_meter_enabled = settings.get("live_meter", True)
         self.live_meter_row.set_active(is_live_meter_enabled)
 
         # 6. Custom Icon selection
         self.icon_row = Adw.ActionRow(
-            title="Custom Icon",
-            subtitle="Select a custom icon to display"
+            title="Custom Icon"
         )
         
         self.choose_icon_button = Gtk.Button.new_from_icon_name("document-open-symbolic")
@@ -918,8 +914,7 @@ class VolumeControl(ActionBase):
 
         # Create Icon Expander Row
         self.icon_expander = Adw.ExpanderRow(
-            title="Icon Configuration",
-            subtitle="Configure icon and scaling"
+            title="Icon Configuration"
         )
         self.icon_expander.add_row(self.icon_row)
         
