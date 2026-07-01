@@ -694,16 +694,16 @@ class VolumeControl(ActionBase):
                 title_w = len(title_text) * 8
             draw.text((center_x - title_w // 2, 16 - 8), title_text, font=font_title, fill=(220, 222, 230, 255))
         
-        # 3. Dial Geometry (Perfect half-circle layout centered at the bottom edge)
-        cx, cy = 100, 100
+        # 3. Dial Geometry (Perfect half-circle layout shifted up to fit within display edges)
+        cx, cy = 100, 92
         
         # Outer Knob Core radius
-        r_outer = 48
+        r_outer = 40
         # Inner Knob Core radius (Thickness = 3px)
-        r_inner = 45
+        r_inner = 37
         
         # Gauge Arc radius
-        r_arc = 56
+        r_arc = 48
         
         # Draw Ticks (broken into quarters - 17 ticks total, every 11.25 degrees)
         for i in range(17):
@@ -711,14 +711,14 @@ class VolumeControl(ActionBase):
             rad = math.radians(tick_angle)
             if i % 4 == 0:
                 # Quarters: longer, thicker lines
-                r_tick_start = 60
-                r_tick_end = 70
+                r_tick_start = 51
+                r_tick_end = 60
                 w = 3
                 color = (160, 162, 175, 255)
             else:
                 # Smaller lines in between
-                r_tick_start = 64
-                r_tick_end = 69
+                r_tick_start = 55
+                r_tick_end = 59
                 w = 1
                 color = (110, 112, 120, 255)
                 
@@ -770,8 +770,8 @@ class VolumeControl(ActionBase):
         rad_pt = math.radians(pointer_angle)
         xp1 = cx + 12 * math.cos(rad_pt)
         yp1 = cy + 12 * math.sin(rad_pt)
-        xp2 = cx + 40 * math.cos(rad_pt)
-        yp2 = cy + 40 * math.sin(rad_pt)
+        xp2 = cx + 32 * math.cos(rad_pt)
+        yp2 = cy + 32 * math.sin(rad_pt)
         pointer_color = (239, 68, 68, 255) if is_muted else (240, 242, 250, 255)
         draw.line([(xp1, yp1), (xp2, yp2)], fill=pointer_color, width=3)
         
