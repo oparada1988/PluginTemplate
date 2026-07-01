@@ -91,7 +91,10 @@ class VolumePeakMonitor:
                     continue
                 try:
                     data = self.proc.stdout.read(chunk_bytes)
-                except (OSError, IOError):
+                except (OSError, IOError) as e:
+                    import errno
+                    if getattr(e, 'errno', None) in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        time.sleep(0.005)
                     continue
                 if not data:
                     break
@@ -154,6 +157,8 @@ class VolumeControl(ActionBase):
         self.last_drawn_volume = -1
         self.last_drawn_mute = None
         self.last_drawn_peak = -1.0
+        self._gauge_gradient_img = None
+        self._render_lock = threading.Lock()
 
     def on_ready(self) -> None:
         self.running = True
@@ -295,12 +300,13 @@ class VolumeControl(ActionBase):
         if not force and not self.get_is_present():
             return
         
-        self.last_drawn_volume = self.current_volume
-        self.last_drawn_mute = self.last_mute
-        self.last_drawn_peak = peak
-        
-        img = self.generate_volume_image(self.current_volume, self.last_mute, peak)
-        GLib.idle_add(self.set_media, img)
+        with self._render_lock:
+            self.last_drawn_volume = self.current_volume
+            self.last_drawn_mute = self.last_mute
+            self.last_drawn_peak = peak
+            
+            img = self.generate_volume_image(self.current_volume, self.last_mute, peak)
+            GLib.idle_add(self.set_media, img)
 
     def run_cmd(self, cmd: list) -> str:
         try:
@@ -426,28 +432,29 @@ class VolumeControl(ActionBase):
             return None
 
     def _get_gauge_gradient_image(self, width: int, height: int, bbox: list) -> Image.Image:
-        if hasattr(self, "_gauge_gradient_img") and self._gauge_gradient_img is not None:
-            return self._gauge_gradient_img
-            
-        grad_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        grad_draw = ImageDraw.Draw(grad_img)
-        for angle in range(180, 360):
-            pct = (angle - 180) / 180.0
-            if pct < 0.5:
-                t = pct / 0.5
-                r_col = int(0 + 235 * t)
-                g_col = int(180 + 40 * t)
-                b_col = 0
-            else:
-                t = (pct - 0.5) / 0.5
-                r_col = int(235 + 20 * t)
-                g_col = int(220 - 160 * t)
-                b_col = 0
+        with self._render_lock:
+            if self._gauge_gradient_img is not None:
+                return self._gauge_gradient_img
                 
-            grad_draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
-            
-        self._gauge_gradient_img = grad_img
-        return self._gauge_gradient_img
+            grad_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            grad_draw = ImageDraw.Draw(grad_img)
+            for angle in range(180, 360):
+                pct = (angle - 180) / 180.0
+                if pct < 0.5:
+                    t = pct / 0.5
+                    r_col = int(0 + 235 * t)
+                    g_col = int(180 + 40 * t)
+                    b_col = 0
+                else:
+                    t = (pct - 0.5) / 0.5
+                    r_col = int(235 + 20 * t)
+                    g_col = int(220 - 160 * t)
+                    b_col = 0
+                    
+                grad_draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
+                
+            self._gauge_gradient_img = grad_img
+            return self._gauge_gradient_img
 
     def generate_volume_image(self, volume: int, is_muted: bool, peak: float = 0.0) -> Image.Image:
         width, height = 200, 100
