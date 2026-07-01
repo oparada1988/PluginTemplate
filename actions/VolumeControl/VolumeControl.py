@@ -174,16 +174,30 @@ class VolumeControl(ActionBase):
         self._current_peak = 0.0
         self._is_polling = False
 
+        # Reusable draw masks & title layout cache for peak performance
+        self._peak_mask = Image.new("L", (200, 100), 0)
+        self._peak_mask_draw = ImageDraw.Draw(self._peak_mask)
+        self._last_title_text = None
+        self._last_font_file = None
+        self._last_font_name = None
+        self._last_font_path = None
+        self._last_title_font_size = None
+        self._last_max_width = None
+        self._resolved_title_text = None
+        self._resolved_font_title = None
+        self._peak_hold_val = 0.0
+        self._peak_hold_ticks = 0
+
     def on_ready(self) -> None:
         self.running = True
         
         # Load initial status once (in a background thread to avoid GTK block)
         threading.Thread(target=self._initial_load_status, daemon=True).start()
         
-        # Start GLib tick timer if live peak meter is enabled
+        # Start GLib tick timer if live peak meter is enabled (increased to 25ms / 40 FPS for premium animation)
         settings = self.get_settings() or {}
         if settings.get("live_meter", True):
-            self.tick_timer_id = GLib.timeout_add(50, self.on_tick_update)
+            self.tick_timer_id = GLib.timeout_add(25, self.on_tick_update)
 
     def _initial_load_status(self):
         settings = self.get_settings() or {}
@@ -288,11 +302,21 @@ class VolumeControl(ActionBase):
         if raw_peak >= self._current_peak:
             self._current_peak = raw_peak
         else:
-            self._current_peak = max(raw_peak, self._current_peak * 0.88 - 0.01)
+            self._current_peak = max(raw_peak, self._current_peak * 0.93 - 0.005)
             
         peak = self._current_peak
         if peak < 0.01:
             peak = 0.0
+
+        # Peak hold logic
+        if raw_peak >= self._peak_hold_val:
+            self._peak_hold_val = raw_peak
+            self._peak_hold_ticks = 12  # Hold peak for ~300ms at 25ms interval
+        else:
+            if self._peak_hold_ticks > 0:
+                self._peak_hold_ticks -= 1
+            else:
+                self._peak_hold_val = max(raw_peak, self._peak_hold_val * 0.96 - 0.003)
         
         peak_diff = abs(peak - self.last_drawn_peak)
         if (self.current_volume != self.last_drawn_volume or 
@@ -707,38 +731,59 @@ class VolumeControl(ActionBase):
             
         left_bound = 12 + icon_w + 6
         right_bound = 188
-        center_x = left_bound + (right_bound - left_bound) // 2
         max_width = right_bound - left_bound - 4
 
-        # Dynamic font sizing & truncation to avoid overlapping icon/volume percentage
-        try:
-            text_w = font_title.getlength(title_text)
-        except Exception:
-            text_w = len(title_text) * (title_font_size * 0.6)
+        # Highly optimized caching of title text layout and font parsing to avoid frame drop
+        if (self._resolved_title_text is not None and
+            self._resolved_font_title is not None and
+            title_text == self._last_title_text and
+            font_file == self._last_font_file and
+            font_name == self._last_font_name and
+            font_path == self._last_font_path and
+            title_font_size == self._last_title_font_size and
+            max_width == self._last_max_width):
+            
+            title_text = self._resolved_title_text
+            font_title = self._resolved_font_title
+        else:
+            self._last_title_text = title_text
+            self._last_font_file = font_file
+            self._last_font_name = font_name
+            self._last_font_path = font_path
+            self._last_title_font_size = title_font_size
+            self._last_max_width = max_width
 
-        current_size = title_font_size
-        while text_w > max_width and current_size > 9:
-            current_size -= 1
-            try:
-                if font_file:
-                    temp_font = ImageFont.truetype(font_file, current_size)
-                else:
-                    temp_font = ImageFont.load_default()
-                
-                try:
-                    text_w = temp_font.getlength(title_text)
-                except Exception:
-                    text_w = len(title_text) * (current_size * 0.6)
-                font_title = temp_font
-            except Exception:
-                break
-
-        while text_w > max_width and len(title_text) > 3:
-            title_text = title_text[:-3] + ".."
             try:
                 text_w = font_title.getlength(title_text)
             except Exception:
-                text_w = len(title_text) * (current_size * 0.6)
+                text_w = len(title_text) * (title_font_size * 0.6)
+
+            current_size = title_font_size
+            while text_w > max_width and current_size > 9:
+                current_size -= 1
+                try:
+                    if font_file:
+                        temp_font = ImageFont.truetype(font_file, current_size)
+                    else:
+                        temp_font = ImageFont.load_default()
+                    
+                    try:
+                        text_w = temp_font.getlength(title_text)
+                    except Exception:
+                        text_w = len(title_text) * (current_size * 0.6)
+                    font_title = temp_font
+                except Exception:
+                    break
+
+            while text_w > max_width and len(title_text) > 3:
+                title_text = title_text[:-3] + ".."
+                try:
+                    text_w = font_title.getlength(title_text)
+                except Exception:
+                    text_w = len(title_text) * (current_size * 0.6)
+            
+            self._resolved_title_text = title_text
+            self._resolved_font_title = font_title
         
         try:
             draw.text((left_bound, 16), title_text, font=font_title, fill=(220, 222, 230, 255), anchor="lm")
@@ -774,10 +819,18 @@ class VolumeControl(ActionBase):
                     scaled_peak = peak * (volume / 100.0)
                     peak_angle = int(180 + 180 * scaled_peak)
                     if peak_angle > 180:
-                        peak_mask = Image.new("L", (width, height), 0)
-                        peak_mask_draw = ImageDraw.Draw(peak_mask)
-                        peak_mask_draw.arc(bbox, start=180, end=peak_angle, fill=255, width=7)
-                        img.paste(grad_img, (0, 0), peak_mask)
+                        # Reuse the pre-allocated peak mask to avoid heavy object instantiation
+                        self._peak_mask_draw.rectangle([(0, 0), (width, height)], fill=0)
+                        self._peak_mask_draw.arc(bbox, start=180, end=peak_angle, fill=255, width=7)
+                        img.paste(grad_img, (0, 0), self._peak_mask)
+
+                # 3. Peak Hold marker (Floating bright indicator for studio console aesthetics)
+                if self._peak_hold_val > 0.04:
+                    scaled_hold = self._peak_hold_val * (volume / 100.0)
+                    hold_angle = int(180 + 180 * scaled_hold)
+                    if hold_angle > 180:
+                        # Draw a small 2-degree bright highlight indicator directly on the image
+                        draw.arc(bbox, start=hold_angle - 1, end=hold_angle + 1, fill=(255, 75, 75, 255), width=7)
             else:
                 # Live meter is disabled -> draw a beautiful fully opaque blue volume meter in sync with knob pointer
                 if vol_angle > 180:
