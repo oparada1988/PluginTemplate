@@ -103,11 +103,10 @@ class VolumePeakMonitor:
                     num_samples = len(chunk) // 2
                     if num_samples > 0:
                         samples = struct.unpack(f"<{num_samples}h", chunk)
-                        peak_val = 0.0
-                        for val in samples:
-                            abs_val = abs(val) / 32768.0
-                            if abs_val > peak_val:
-                                peak_val = abs_val
+                        # High-performance absolute peak calculation using builtins in C
+                        max_val = max(samples)
+                        min_val = min(samples)
+                        peak_val = max(max_val, -min_val) / 32768.0
                         smooth_val = max(peak_val, smooth_val * decay)
                         with self.lock:
                             self.peak = smooth_val
@@ -271,7 +270,7 @@ class VolumeControl(ActionBase):
         peak_diff = abs(peak - self.last_drawn_peak)
         if (self.current_volume != self.last_drawn_volume or 
             self.last_mute != self.last_drawn_mute or 
-            (peak > 0.0 and peak_diff > 0.04) or 
+            (peak > 0.0 and peak_diff > 0.01) or 
             (peak == 0.0 and self.last_drawn_peak > 0.0)):
             
             self.update_ui_rendering(peak)
@@ -427,6 +426,30 @@ class VolumeControl(ActionBase):
                 return Image.open(path)
         except Exception:
             return None
+
+    def _get_gauge_gradient_image(self, width: int, height: int, bbox: list) -> Image.Image:
+        if hasattr(self, "_gauge_gradient_img") and self._gauge_gradient_img is not None:
+            return self._gauge_gradient_img
+            
+        grad_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        grad_draw = ImageDraw.Draw(grad_img)
+        for angle in range(180, 360):
+            pct = (angle - 180) / 180.0
+            if pct < 0.5:
+                t = pct / 0.5
+                r_col = int(0 + 235 * t)
+                g_col = int(180 + 40 * t)
+                b_col = 0
+            else:
+                t = (pct - 0.5) / 0.5
+                r_col = int(235 + 20 * t)
+                g_col = int(220 - 160 * t)
+                b_col = 0
+                
+            grad_draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
+            
+        self._gauge_gradient_img = grad_img
+        return self._gauge_gradient_img
 
     def generate_volume_image(self, volume: int, is_muted: bool, peak: float = 0.0) -> Image.Image:
         width, height = 200, 100
@@ -678,23 +701,16 @@ class VolumeControl(ActionBase):
         draw.arc(bbox, start=180, end=360, fill=(38, 38, 42, 255), width=7)
         
         # Draw Active Gauge Segment (now functions as the live audio playback meter)
+        # Draw Active Gauge Segment (now functions as the live audio playback meter)
         if not is_muted and peak > 0.04:
             scaled_peak = peak * (volume / 100.0)
-            end_angle = 180 + 180 * scaled_peak
-            for angle in range(180, int(end_angle)):
-                pct = (angle - 180) / 180.0
-                if pct < 0.5:
-                    t = pct / 0.5
-                    r_col = int(0 + 235 * t)
-                    g_col = int(180 + 40 * t)
-                    b_col = 0
-                else:
-                    t = (pct - 0.5) / 0.5
-                    r_col = int(235 + 20 * t)
-                    g_col = int(220 - 160 * t)
-                    b_col = 0
-                    
-                draw.arc(bbox, start=angle, end=angle+2, fill=(r_col, g_col, b_col, 255), width=7)
+            end_angle = int(180 + 180 * scaled_peak)
+            if end_angle > 180:
+                mask = Image.new("L", (width, height), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.arc(bbox, start=180, end=end_angle, fill=255, width=7)
+                grad_img = self._get_gauge_gradient_image(width, height, bbox)
+                img.paste(grad_img, (0, 0), mask)
 
         # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
         draw.ellipse([(cx - rx_outer, cy - ry_outer), (cx + rx_outer, cy + ry_outer)], fill=(18, 18, 20, 255))
