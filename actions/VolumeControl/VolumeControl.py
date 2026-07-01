@@ -167,6 +167,8 @@ class VolumeControl(ActionBase):
         self._cached_font_path = None
         self._cached_icon_path = None
         self._cached_icon_img = None
+        self._cached_font_file = None
+        self._cached_title_font_size = 14
 
     def on_ready(self) -> None:
         self.running = True
@@ -553,11 +555,15 @@ class VolumeControl(ActionBase):
             except Exception:
                 self._cached_font_vol = ImageFont.load_default()
                 
+            self._cached_font_file = font_file
+            self._cached_title_font_size = title_font_size
             self._cached_font_name = font_name
             self._cached_font_path = font_path
             
         font_title = self._cached_font_title
         font_vol = self._cached_font_vol
+        font_file = self._cached_font_file
+        title_font_size = self._cached_title_font_size
 
         # Calculate volume text width to determine boundaries
         vol_text = "MUTE" if is_muted else f"{volume}%"
