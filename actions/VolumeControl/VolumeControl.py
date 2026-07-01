@@ -760,10 +760,12 @@ class VolumeControl(ActionBase):
                 if vol_angle > 180:
                     draw.arc(bbox, start=180, end=vol_angle, fill=(0, 168, 255, 255), width=7)
 
-        # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
-        draw.ellipse([(cx - r_outer, cy - r_outer), (cx + r_outer, cy + r_outer)], fill=(18, 18, 20, 255))
+        # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look - using chord to keep strictly above cy)
+        bbox_outer = [(cx - r_outer, cy - r_outer), (cx + r_outer, cy + r_outer)]
+        draw.chord(bbox_outer, start=180, end=360, fill=(18, 18, 20, 255))
         # Inner circle of the core
-        draw.ellipse([(cx - r_inner, cy - r_inner), (cx + r_inner, cy + r_inner)], fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
+        bbox_inner = [(cx - r_inner, cy - r_inner), (cx + r_inner, cy + r_inner)]
+        draw.chord(bbox_inner, start=180, end=360, fill=(28, 28, 32, 255), outline=(60, 62, 72, 255), width=1)
         
         # 5. Draw Pointer line on top of the knob (still represents static volume level)
         pointer_angle = 180 + 180 * (volume / 100.0)
