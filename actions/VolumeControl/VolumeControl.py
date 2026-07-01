@@ -509,13 +509,13 @@ class VolumeControl(ActionBase):
         except Exception:
             vol_w = 56
             
-        # Draw Volume Text (right-aligned, vertically centered at y=20)
+        # Draw Volume Text (right-aligned, vertically centered at y=16)
         try:
-            draw.text((188, 20), vol_text, font=font_vol, fill=vol_color, anchor="rm")
+            draw.text((188, 16), vol_text, font=font_vol, fill=vol_color, anchor="rm")
         except TypeError:
-            draw.text((188 - vol_w, 20 - 14), vol_text, font=font_vol, fill=vol_color)
+            draw.text((188 - vol_w, 16 - 14), vol_text, font=font_vol, fill=vol_color)
         
-        # Icon placement area (vertical center shifted to y=20, base size increased to 24)
+        # Icon placement area (vertical center shifted to y=16, base size increased to 24)
         icon_drawn = False
         icon_w = 24  # Base width of the icon area
         if custom_icon_path:
@@ -527,9 +527,9 @@ class VolumeControl(ActionBase):
                 scaled_size = max(4, min(scaled_size, 60))
                 icon_img = icon_img.resize((scaled_size, scaled_size))
                 
-                # Center vertically at y=20, left-aligned at x=12
+                # Center vertically at y=16, left-aligned at x=12
                 x_start = 12
-                y_start = 20 - scaled_size // 2
+                y_start = 16 - scaled_size // 2
                 
                 if is_muted:
                     r, g, b, a = icon_img.split()
@@ -545,11 +545,11 @@ class VolumeControl(ActionBase):
                 icon_w = scaled_size
 
         if not icon_drawn:
-            # Default Speaker Icon (slate-blue speaker with cyan/blue waves, shifted to y=20 center)
-            spk_x, spk_y = 12, 13
+            # Default Speaker Icon (slate-blue speaker with cyan/blue waves, shifted to y=16 center)
+            spk_x, spk_y = 12, 9
             spk_color = (90, 105, 120, 255) if is_muted else (110, 130, 150, 255)
             
-            # Speaker body (centered vertically at y=20)
+            # Speaker body (centered vertically at y=16)
             draw.rectangle([(spk_x, spk_y + 4), (spk_x + 5, spk_y + 10)], fill=spk_color)
             # Speaker cone
             draw.polygon([(spk_x + 5, spk_y + 4), (spk_x + 10, spk_y + 0), (spk_x + 10, spk_y + 14), (spk_x + 5, spk_y + 10)], fill=spk_color)
@@ -570,24 +570,52 @@ class VolumeControl(ActionBase):
         else:
             title_text = settings.get("pipewire_device_name", "Default Sink")
             
-        if len(title_text) > 16:
-            title_text = title_text[:14] + ".."
-            
         left_bound = 12 + icon_w + 6
         right_bound = 188 - vol_w - 6
         center_x = left_bound + (right_bound - left_bound) // 2
+        max_width = right_bound - left_bound - 4
+
+        # Dynamic font sizing & truncation to avoid overlapping icon/volume percentage
+        try:
+            text_w = font_title.getlength(title_text)
+        except Exception:
+            text_w = len(title_text) * (title_font_size * 0.6)
+
+        current_size = title_font_size
+        while text_w > max_width and current_size > 9:
+            current_size -= 1
+            try:
+                if font_file:
+                    temp_font = ImageFont.truetype(font_file, current_size)
+                else:
+                    temp_font = ImageFont.load_default()
+                
+                try:
+                    text_w = temp_font.getlength(title_text)
+                except Exception:
+                    text_w = len(title_text) * (current_size * 0.6)
+                font_title = temp_font
+            except Exception:
+                break
+
+        while text_w > max_width and len(title_text) > 3:
+            title_text = title_text[:-3] + ".."
+            try:
+                text_w = font_title.getlength(title_text)
+            except Exception:
+                text_w = len(title_text) * (current_size * 0.6)
         
         try:
-            draw.text((center_x, 20), title_text, font=font_title, fill=(220, 222, 230, 255), anchor="mm")
+            draw.text((center_x, 16), title_text, font=font_title, fill=(220, 222, 230, 255), anchor="mm")
         except TypeError:
             try:
                 title_w = font_title.getlength(title_text)
             except Exception:
                 title_w = len(title_text) * 8
-            draw.text((center_x - title_w // 2, 20 - 8), title_text, font=font_title, fill=(220, 222, 230, 255))
+            draw.text((center_x - title_w // 2, 16 - 8), title_text, font=font_title, fill=(220, 222, 230, 255))
         
         # 3. Dial Geometry (Smaller knob core: Width = 80px, Height = 38px)
-        cx, cy = 100, 96
+        cx, cy = 100, 100
         
         # Outer Knob Core dimensions (80px wide, 38px high)
         rx_outer, ry_outer = 40, 38
