@@ -158,7 +158,7 @@ class VolumeControl(ActionBase):
         self.last_drawn_mute = None
         self.last_drawn_peak = -1.0
         self._gauge_gradient_img = None
-        self._render_lock = threading.Lock()
+        self._render_lock = threading.RLock()
 
     def on_ready(self) -> None:
         self.running = True
