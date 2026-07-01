@@ -701,17 +701,27 @@ class VolumeControl(ActionBase):
         bbox = [(cx - rx_arc, cy - ry_arc), (cx + rx_arc, cy + ry_arc)]
         draw.arc(bbox, start=180, end=360, fill=(38, 38, 42, 255), width=7)
         
-        # Draw Active Gauge Segment (now functions as the live audio playback meter)
-        # Draw Active Gauge Segment (now functions as the live audio playback meter)
-        if not is_muted and peak > 0.04:
-            scaled_peak = peak * (volume / 100.0)
-            end_angle = int(180 + 180 * scaled_peak)
-            if end_angle > 180:
-                mask = Image.new("L", (width, height), 0)
-                mask_draw = ImageDraw.Draw(mask)
-                mask_draw.arc(bbox, start=180, end=end_angle, fill=255, width=7)
-                grad_img = self._get_gauge_gradient_image(width, height, bbox)
-                img.paste(grad_img, (0, 0), mask)
+        # Draw Active Gauge Segments: static volume (dimmed) + live audio peak (fully bright)
+        if not is_muted:
+            grad_img = self._get_gauge_gradient_image(width, height, bbox)
+            
+            # 1. Dimmed volume level gradient arc (representing volume)
+            vol_angle = int(180 + 180 * (volume / 100.0))
+            if vol_angle > 180:
+                vol_mask = Image.new("L", (width, height), 0)
+                vol_mask_draw = ImageDraw.Draw(vol_mask)
+                vol_mask_draw.arc(bbox, start=180, end=vol_angle, fill=75, width=7)
+                img.paste(grad_img, (0, 0), vol_mask)
+            
+            # 2. Fully bright audio peak gradient arc bouncing within/up to current volume
+            if peak > 0.04:
+                scaled_peak = peak * (volume / 100.0)
+                peak_angle = int(180 + 180 * scaled_peak)
+                if peak_angle > 180:
+                    peak_mask = Image.new("L", (width, height), 0)
+                    peak_mask_draw = ImageDraw.Draw(peak_mask)
+                    peak_mask_draw.arc(bbox, start=180, end=peak_angle, fill=255, width=7)
+                    img.paste(grad_img, (0, 0), peak_mask)
 
         # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
         draw.ellipse([(cx - rx_outer, cy - ry_outer), (cx + rx_outer, cy + ry_outer)], fill=(18, 18, 20, 255))
