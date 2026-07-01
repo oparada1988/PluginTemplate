@@ -552,15 +552,15 @@ class VolumeControl(ActionBase):
             icon_img = self.load_icon_image(custom_icon_path)
             if icon_img is not None:
                 icon_img = icon_img.convert("RGBA")
-                base_size = 16  # Base size scaled to fit layout nicely
+                base_size = 14  # Base size scaled to fit layout nicely
                 scaled_size = int(base_size * icon_scale)
-                scaled_size = max(4, min(scaled_size, 32))  # Clamp to max 32 to prevent out of bounds clipping
+                scaled_size = max(4, min(scaled_size, 28))  # Clamp to max 28 to prevent out of bounds clipping
                 icon_img = icon_img.resize((scaled_size, scaled_size))
                 
-                # Keep within bounds: y between 2 and 36, x at 12
+                # Keep within bounds: y between 6 and 38, x at 12
                 x_start = 12
                 y_start = 16 - scaled_size // 2
-                y_start = max(2, min(y_start, 36 - scaled_size))
+                y_start = max(6, min(y_start, 38 - scaled_size))
                 
                 if is_muted:
                     r, g, b, a = icon_img.split()
