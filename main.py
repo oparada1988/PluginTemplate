@@ -15,8 +15,8 @@ class PluginTemplate(PluginBase):
         self.volume_control_holder = ActionHolder(
             plugin_base = self,
             action_base = VolumeControl,
-            action_id = "com_oparada_VolumeControlPlus::VolumeControl",
-            action_name = "Volume Control Plus",
+            action_id = "com_oparada_VolumeControllerPlus::VolumeControl",
+            action_name = "Volume Controller Plus",
             action_support = {
                 Input.Key: ActionInputSupport.UNSUPPORTED,
                 Input.Dial: ActionInputSupport.SUPPORTED,
@@ -27,8 +27,8 @@ class PluginTemplate(PluginBase):
 
         # Register plugin
         self.register(
-            plugin_name = "Volume Control Plus",
-            github_repo = "https://github.com/oparada1988/PluginTemplate",
+            plugin_name = "Volume Controller Plus",
+            github_repo = "https://github.com/oparada1988/VolumeControllerPlus",
             plugin_version = "1.0.0",
             app_version = "1.0.0-alpha"
         )
