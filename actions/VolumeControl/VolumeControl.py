@@ -161,10 +161,10 @@ class VolumeControl(ActionBase):
         # Load initial status once (in a background thread to avoid GTK block)
         threading.Thread(target=self._initial_load_status, daemon=True).start()
         
-        # Start GLib tick timer based on configured FPS for real-time peak meter
-        fps = self.get_meter_fps()
-        interval = int(1000 / fps)
-        self.tick_timer_id = GLib.timeout_add(interval, self.on_tick_update)
+        # Start GLib tick timer if live peak meter is enabled
+        settings = self.get_settings() or {}
+        if settings.get("live_meter", True):
+            self.tick_timer_id = GLib.timeout_add(50, self.on_tick_update)
 
     def _initial_load_status(self):
         settings = self.get_settings() or {}
@@ -184,7 +184,8 @@ class VolumeControl(ActionBase):
         self.current_volume = vol
         self.last_mute = mute
         self.update_ui_rendering()
-        self.restart_peak_monitor()
+        if settings.get("live_meter", True):
+            self.restart_peak_monitor()
 
     def on_remove(self) -> None:
         self.running = False
@@ -232,15 +233,11 @@ class VolumeControl(ActionBase):
                 return 5
         return 5
 
-    def get_meter_fps(self) -> int:
+    def get_live_meter(self) -> bool:
         settings = self.get_settings()
         if settings is not None:
-            val = settings.get("meter_fps", "25 FPS")
-            try:
-                return int(val.split()[0])
-            except ValueError:
-                return 25
-        return 25
+            return settings.get("live_meter", True)
+        return True
 
     def get_configured_device_id(self) -> str:
         settings = self.get_settings() or {}
@@ -701,27 +698,34 @@ class VolumeControl(ActionBase):
         bbox = [(cx - rx_arc, cy - ry_arc), (cx + rx_arc, cy + ry_arc)]
         draw.arc(bbox, start=180, end=360, fill=(38, 38, 42, 255), width=7)
         
-        # Draw Active Gauge Segments: static volume (dimmed) + live audio peak (fully bright)
+        # Draw Active Gauge Segments: static volume (dimmed) + live audio peak (fully bright) OR blue volume meter
         if not is_muted:
-            grad_img = self._get_gauge_gradient_image(width, height, bbox)
-            
-            # 1. Dimmed volume level gradient arc (representing volume)
             vol_angle = int(180 + 180 * (volume / 100.0))
-            if vol_angle > 180:
-                vol_mask = Image.new("L", (width, height), 0)
-                vol_mask_draw = ImageDraw.Draw(vol_mask)
-                vol_mask_draw.arc(bbox, start=180, end=vol_angle, fill=75, width=7)
-                img.paste(grad_img, (0, 0), vol_mask)
+            is_live_enabled = settings.get("live_meter", True)
             
-            # 2. Fully bright audio peak gradient arc bouncing within/up to current volume
-            if peak > 0.04:
-                scaled_peak = peak * (volume / 100.0)
-                peak_angle = int(180 + 180 * scaled_peak)
-                if peak_angle > 180:
-                    peak_mask = Image.new("L", (width, height), 0)
-                    peak_mask_draw = ImageDraw.Draw(peak_mask)
-                    peak_mask_draw.arc(bbox, start=180, end=peak_angle, fill=255, width=7)
-                    img.paste(grad_img, (0, 0), peak_mask)
+            if is_live_enabled:
+                grad_img = self._get_gauge_gradient_image(width, height, bbox)
+                
+                # 1. Dimmed volume level gradient arc (representing volume)
+                if vol_angle > 180:
+                    vol_mask = Image.new("L", (width, height), 0)
+                    vol_mask_draw = ImageDraw.Draw(vol_mask)
+                    vol_mask_draw.arc(bbox, start=180, end=vol_angle, fill=75, width=7)
+                    img.paste(grad_img, (0, 0), vol_mask)
+                
+                # 2. Fully bright audio peak gradient arc bouncing within/up to current volume
+                if peak > 0.04:
+                    scaled_peak = peak * (volume / 100.0)
+                    peak_angle = int(180 + 180 * scaled_peak)
+                    if peak_angle > 180:
+                        peak_mask = Image.new("L", (width, height), 0)
+                        peak_mask_draw = ImageDraw.Draw(peak_mask)
+                        peak_mask_draw.arc(bbox, start=180, end=peak_angle, fill=255, width=7)
+                        img.paste(grad_img, (0, 0), peak_mask)
+            else:
+                # Live meter is disabled -> draw a beautiful fully opaque blue volume meter in sync with knob pointer
+                if vol_angle > 180:
+                    draw.arc(bbox, start=180, end=vol_angle, fill=(0, 168, 255, 255), width=7)
 
         # 4. Draw Inner Knob Core (Outer shadow/border for 3D bevel look)
         draw.ellipse([(cx - rx_outer, cy - ry_outer), (cx + rx_outer, cy + ry_outer)], fill=(18, 18, 20, 255))
@@ -838,22 +842,13 @@ class VolumeControl(ActionBase):
         else:
             self.step_selector.set_selected(2) # Default to 5%
             
-        # 5. FPS selection combo row
-        self.fps_model = Gtk.StringList()
-        fps_options = ["1 FPS", "5 FPS", "10 FPS", "15 FPS", "20 FPS", "25 FPS"]
-        for opt in fps_options:
-            self.fps_model.append(opt)
-            
-        self.fps_selector = Adw.ComboRow(
-            model=self.fps_model,
-            title="Meter Update Rate (FPS)",
-            subtitle="Higher FPS yields smoother animations but increases CPU usage"
+        # 5. Live Meter Toggle Row
+        self.live_meter_row = Adw.SwitchRow(
+            title="Live Peak Meter",
+            subtitle="Enable real-time audio peak visualization"
         )
-        current_fps = f"{self.get_meter_fps()} FPS"
-        if current_fps in fps_options:
-            self.fps_selector.set_selected(fps_options.index(current_fps))
-        else:
-            self.fps_selector.set_selected(5) # Default to 25 FPS
+        is_live_meter_enabled = settings.get("live_meter", True)
+        self.live_meter_row.set_active(is_live_meter_enabled)
 
         # 6. Custom Icon selection
         self.icon_row = Adw.ActionRow(
@@ -892,7 +887,7 @@ class VolumeControl(ActionBase):
         self.type_selector.connect("notify::selected-item", self.on_device_type_changed)
         self.pw_device_selector.connect("notify::selected-item", self.on_pw_device_changed)
         self.step_selector.connect("notify::selected-item", self.on_step_changed)
-        self.fps_selector.connect("notify::selected-item", self.on_fps_changed)
+        self.live_meter_row.connect("notify::active", self.on_live_meter_toggled)
         self.choose_icon_button.connect("clicked", self.on_choose_icon_clicked)
         self.clear_icon_button.connect("clicked", self.on_clear_icon_clicked)
         self.font_row.connect("activated", self.on_choose_font_clicked)
@@ -922,7 +917,7 @@ class VolumeControl(ActionBase):
             self.type_selector,
             self.pw_device_selector,
             self.step_selector,
-            self.fps_selector,
+            self.live_meter_row,
             self.icon_expander
         ]
 
@@ -978,22 +973,24 @@ class VolumeControl(ActionBase):
             settings["step_size"] = selected_item.get_string()
             self.set_settings(settings)
 
-    def on_fps_changed(self, combo, *args):
+    def on_live_meter_toggled(self, row, *args):
         settings = self.get_settings() or {}
-        selected_item = combo.get_selected_item()
-        if selected_item is not None:
-            settings["meter_fps"] = selected_item.get_string()
-            self.set_settings(settings)
-            
-            # Restart GLib timer with the new update interval
+        settings["live_meter"] = row.get_active()
+        self.set_settings(settings)
+        
+        # Stop or restart timers/threads based on the new setting
+        if not settings["live_meter"]:
             if self.tick_timer_id:
                 GLib.source_remove(self.tick_timer_id)
                 self.tick_timer_id = 0
-            
-            if self.running:
-                fps = self.get_meter_fps()
-                interval = int(1000 / fps)
-                self.tick_timer_id = GLib.timeout_add(interval, self.on_tick_update)
+            self.peak_monitor.stop()
+        else:
+            self.restart_peak_monitor()
+            # Start timer at 20 FPS (50ms interval)
+            if not self.tick_timer_id and self.running:
+                self.tick_timer_id = GLib.timeout_add(50, self.on_tick_update)
+                
+        self.update_ui_rendering(force=True)
 
     def on_choose_icon_clicked(self, button):
         settings = self.get_settings() or {}
