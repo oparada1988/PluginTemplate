@@ -1,6 +1,6 @@
 # Volume Control for Stream Deck Plus
+<img width="1000" height="360" alt="g31" src="https://github.com/user-attachments/assets/254e6175-572e-4f63-beaa-333d7a278b89" />
 
-![Thumbnail](assets/thumbnail.png)
 
 Official-style Volume Control plugin for Stream Deck Plus. Allows volume adjustment via dials, mute toggle via dial push, and touchscreen drag gestures to mute/unmute the audio.
 
