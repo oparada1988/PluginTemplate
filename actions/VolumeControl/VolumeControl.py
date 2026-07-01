@@ -225,7 +225,7 @@ class VolumeControl(ActionBase):
             self.change_volume(self.get_step_size())
         elif event == Input.Dial.Events.TURN_CCW:
             self.change_volume(-self.get_step_size())
-        elif event in [Input.Dial.Events.DOWN, Input.Dial.Events.SHORT_TOUCH_PRESS]:
+        elif event in [Input.Dial.Events.DOWN, Input.Dial.Events.SHORT_TOUCH_PRESS, Input.Touchscreen.Events.DRAG_LEFT, Input.Touchscreen.Events.DRAG_RIGHT]:
             self.toggle_mute()
         else:
             super()._raw_event_callback(event, data)
@@ -235,7 +235,7 @@ class VolumeControl(ActionBase):
             self.change_volume(self.get_step_size())
         elif event == Input.Dial.Events.TURN_CCW:
             self.change_volume(-self.get_step_size())
-        elif event in [Input.Dial.Events.DOWN, Input.Dial.Events.SHORT_TOUCH_PRESS]:
+        elif event in [Input.Dial.Events.DOWN, Input.Dial.Events.SHORT_TOUCH_PRESS, Input.Touchscreen.Events.DRAG_LEFT, Input.Touchscreen.Events.DRAG_RIGHT]:
             self.toggle_mute()
         else:
             super().event_callback(event, data)

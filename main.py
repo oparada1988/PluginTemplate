@@ -18,9 +18,9 @@ class PluginTemplate(PluginBase):
             action_id = "com_oparada_VolumeControlPlus::VolumeControl",
             action_name = "Volume Control Plus",
             action_support = {
-                Input.Key: ActionInputSupport.SUPPORTED,
+                Input.Key: ActionInputSupport.UNSUPPORTED,
                 Input.Dial: ActionInputSupport.SUPPORTED,
-                Input.Touchscreen: ActionInputSupport.UNTESTED
+                Input.Touchscreen: ActionInputSupport.SUPPORTED
             }
         )
         self.add_action_holder(self.volume_control_holder)
