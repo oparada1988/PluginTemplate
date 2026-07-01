@@ -449,7 +449,16 @@ class VolumeControl(ActionBase):
         # 2. Header
         settings = self.get_settings() or {}
         custom_icon_path = settings.get("custom_icon", "")
-        icon_scale = settings.get("icon_scale", 1.0)
+        icon_scale_val = settings.get("icon_scale", 0.0)
+        try:
+            icon_scale_val = float(icon_scale_val)
+        except ValueError:
+            icon_scale_val = 0.0
+            
+        if icon_scale_val == 0.0:
+            icon_scale = 1.0
+        else:
+            icon_scale = icon_scale_val
 
         # Fonts
         font_path = settings.get("font_path", "")
@@ -830,39 +839,52 @@ class VolumeControl(ActionBase):
         # 6. Custom Icon selection
         self.icon_row = Adw.ActionRow(
             title="Custom Icon",
-            subtitle="Select a custom icon to display"
+            subtitle="Select custom icon and scale"
         )
+        
+        # Create scale controller box (Minus, Label, Plus) next to the icon buttons
+        self.scale_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.scale_box.set_valign(Gtk.Align.CENTER)
+        
+        self.minus_button = Gtk.Button.new_from_icon_name("list-remove-symbolic")
+        self.minus_button.set_valign(Gtk.Align.CENTER)
+        self.minus_button.set_tooltip_text("Decrease Icon Scale")
+        
+        # Current scale value
+        current_scale = settings.get("icon_scale", 0.0)
+        try:
+            current_scale = float(current_scale)
+        except ValueError:
+            current_scale = 0.0
+        current_scale = max(0.0, min(2.0, current_scale))
+        
+        self.scale_label = Gtk.Label()
+        self.scale_label.set_valign(Gtk.Align.CENTER)
+        self.scale_label.set_width_chars(12)
+        self.update_scale_label_text(current_scale)
+        
+        self.plus_button = Gtk.Button.new_from_icon_name("list-add-symbolic")
+        self.plus_button.set_valign(Gtk.Align.CENTER)
+        self.plus_button.set_tooltip_text("Increase Icon Scale")
+        
+        self.scale_box.append(self.minus_button)
+        self.scale_box.append(self.scale_label)
+        self.scale_box.append(self.plus_button)
         
         self.choose_icon_button = Gtk.Button.new_from_icon_name("document-open-symbolic")
         self.choose_icon_button.set_valign(Gtk.Align.CENTER)
-        self.icon_row.add_suffix(self.choose_icon_button)
+        self.choose_icon_button.set_tooltip_text("Choose Icon")
         
         self.clear_icon_button = Gtk.Button.new_from_icon_name("edit-clear-symbolic")
         self.clear_icon_button.set_valign(Gtk.Align.CENTER)
+        self.clear_icon_button.set_tooltip_text("Clear Icon")
+        
+        # Add suffixes: scale_box, then choose_icon_button, then clear_icon_button
+        self.icon_row.add_suffix(self.scale_box)
+        self.icon_row.add_suffix(self.choose_icon_button)
         self.icon_row.add_suffix(self.clear_icon_button)
-        
-        # 7. Icon Scale slider (Wrapped in Gtk.Box and PreferencesRow to allow dragging)
-        self.scale_row = Adw.PreferencesRow()
-        self.scale_row.set_activatable(False)
-        scale_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        scale_box.set_margin_start(12)
-        scale_box.set_margin_end(12)
-        scale_box.set_margin_top(8)
-        scale_box.set_margin_bottom(8)
-        scale_label = Gtk.Label.new("Icon Scale")
-        scale_label.set_xalign(0.0)
-        scale_box.append(scale_label)
-        
-        current_scale = settings.get("icon_scale", 1.0)
-        self.scale_adj = Gtk.Adjustment.new(current_scale, 0.4, 2.0, 0.05, 0.1, 0.0)
-        self.scale_slider = Gtk.Scale.new(Gtk.Orientation.HORIZONTAL, self.scale_adj)
-        self.scale_slider.set_draw_value(True)
-        self.scale_slider.set_hexpand(True)
-        self.scale_slider.set_valign(Gtk.Align.CENTER)
-        scale_box.append(self.scale_slider)
-        self.scale_row.set_child(scale_box)
 
-        # 8. Custom Font Row (using FontChooserDialog)
+        # 7. Custom Font Row (using FontChooserDialog)
         friendly_font_name = settings.get("font_name")
         if not friendly_font_name:
             font_path_val = settings.get("font_path", "Ubuntu-B.ttf")
@@ -884,7 +906,8 @@ class VolumeControl(ActionBase):
         self.fps_selector.connect("notify::selected-item", self.on_fps_changed)
         self.choose_icon_button.connect("clicked", self.on_choose_icon_clicked)
         self.clear_icon_button.connect("clicked", self.on_clear_icon_clicked)
-        self.scale_slider.connect("value-changed", self.on_scale_changed)
+        self.minus_button.connect("clicked", self.on_minus_scale_clicked)
+        self.plus_button.connect("clicked", self.on_plus_scale_clicked)
         self.font_row.connect("activated", self.on_choose_font_clicked)
         self.choose_font_button.connect("clicked", self.on_choose_font_clicked)
         
@@ -906,7 +929,6 @@ class VolumeControl(ActionBase):
             subtitle="Configure icon and scaling"
         )
         self.icon_expander.add_row(self.icon_row)
-        self.icon_expander.add_row(self.scale_row)
         
         return [
             self.text_expander,
@@ -1010,10 +1032,40 @@ class VolumeControl(ActionBase):
         self.clear_icon_button.set_sensitive(False)
         self.update_ui_rendering(force=True)
 
-    def on_scale_changed(self, slider):
+    def update_scale_label_text(self, scale_val: float):
+        if scale_val == 0.0:
+            self.scale_label.set_text("Default (0.0)")
+        else:
+            self.scale_label.set_text(f"{scale_val:.1f}")
+
+    def on_minus_scale_clicked(self, button):
         settings = self.get_settings() or {}
-        settings["icon_scale"] = slider.get_value()
+        current_scale = settings.get("icon_scale", 0.0)
+        try:
+            current_scale = float(current_scale)
+        except ValueError:
+            current_scale = 0.0
+        
+        new_scale = round(max(0.0, current_scale - 0.1), 1)
+        settings["icon_scale"] = new_scale
         self.set_settings(settings)
+        
+        self.update_scale_label_text(new_scale)
+        self.update_ui_rendering(force=True)
+
+    def on_plus_scale_clicked(self, button):
+        settings = self.get_settings() or {}
+        current_scale = settings.get("icon_scale", 0.0)
+        try:
+            current_scale = float(current_scale)
+        except ValueError:
+            current_scale = 0.0
+        
+        new_scale = round(min(2.0, current_scale + 0.1), 1)
+        settings["icon_scale"] = new_scale
+        self.set_settings(settings)
+        
+        self.update_scale_label_text(new_scale)
         self.update_ui_rendering(force=True)
 
     def font_name_to_path(self, font_name: str) -> str:
