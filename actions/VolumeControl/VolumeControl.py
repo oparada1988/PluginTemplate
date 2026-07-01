@@ -649,7 +649,13 @@ class VolumeControl(ActionBase):
             title_text = settings.get("pipewire_device_name", "Default Sink")
             
         left_bound = 12 + icon_w + 6
-        right_bound = 188
+        # Calculate maximum possible volume text width statically to avoid shifting the title text
+        try:
+            max_vol_w = max(font_vol.getlength("100%"), font_vol.getlength("MUTE"))
+        except Exception:
+            max_vol_w = 48  # Safe default fallback for maximum width
+
+        right_bound = 188 - max_vol_w - 6
         center_x = left_bound + (right_bound - left_bound) // 2
         max_width = right_bound - left_bound - 4
 
