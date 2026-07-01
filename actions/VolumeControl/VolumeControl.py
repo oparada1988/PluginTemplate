@@ -169,6 +169,9 @@ class VolumeControl(ActionBase):
         self._cached_icon_img = None
         self._cached_font_file = None
         self._cached_title_font_size = 14
+        self._cached_base_bg = None
+        self._cached_vol_mask = None
+        self._current_peak = 0.0
 
     def on_ready(self) -> None:
         self.running = True
@@ -274,10 +277,20 @@ class VolumeControl(ActionBase):
         if not self.running:
             return False
             
-        peak = self.peak_monitor.get_peak()
+        raw_peak = self.peak_monitor.get_peak()
         # Apply a 1.5x gain boost to ensure standard audio peaks reach the red/orange zone at 100% volume
-        peak = max(0.0, min(1.0, peak * 1.5))
-        if peak < 0.04:
+        raw_peak = max(0.0, min(1.0, raw_peak * 1.5))
+        if raw_peak < 0.04:
+            raw_peak = 0.0
+            
+        # Fast attack, slow release exponential smoothing for premium hardware meter physics
+        if raw_peak >= self._current_peak:
+            self._current_peak = raw_peak
+        else:
+            self._current_peak = max(raw_peak, self._current_peak * 0.88 - 0.01)
+            
+        peak = self._current_peak
+        if peak < 0.01:
             peak = 0.0
         
         peak_diff = abs(peak - self.last_drawn_peak)
@@ -469,19 +482,57 @@ class VolumeControl(ActionBase):
     def generate_volume_image(self, volume: int, is_muted: bool, peak: float = 0.0) -> Image.Image:
         width, height = 200, 100
         
-        # 1. Load Background Image (lazily cached)
-        if self.bg_image is None:
-            bg_path = os.path.join(self.plugin_base.PATH, "assets", "background-volume.png")
-            try:
-                self.bg_image = Image.open(bg_path).convert("RGBA")
-            except Exception:
-                pass
+        # 1. Load/Generate Base Background with Ticks & Gauge Track (cached to avoid drawing lines/arcs every frame)
+        if self._cached_base_bg is None:
+            if self.bg_image is None:
+                bg_path = os.path.join(self.plugin_base.PATH, "assets", "background-volume.png")
+                try:
+                    self.bg_image = Image.open(bg_path).convert("RGBA")
+                except Exception:
+                    pass
+                    
+            if self.bg_image is not None:
+                bg = self.bg_image.copy()
+            else:
+                bg = Image.new("RGBA", (width, height), (28, 28, 28, 255))
                 
-        if self.bg_image is not None:
-            img = self.bg_image.copy()
-        else:
-            img = Image.new("RGBA", (width, height), (28, 28, 28, 255))
+            bg_draw = ImageDraw.Draw(bg)
             
+            # Pre-render Ticks (broken into quarters - 17 ticks total, every 11.25 degrees)
+            cx_bg, cy_bg = 100, 92
+            r_tick_major_start = 51
+            r_tick_major_end = 60
+            r_tick_minor_start = 55
+            r_tick_minor_end = 59
+            
+            for i in range(17):
+                tick_angle = 180 + i * 11.25
+                rad = math.radians(tick_angle)
+                if i % 4 == 0:
+                    r_tick_start = r_tick_major_start
+                    r_tick_end = r_tick_major_end
+                    w = 3
+                    color = (160, 162, 175, 255)
+                else:
+                    r_tick_start = r_tick_minor_start
+                    r_tick_end = r_tick_minor_end
+                    w = 1
+                    color = (110, 112, 120, 255)
+                    
+                x1 = cx_bg + r_tick_start * math.cos(rad)
+                y1 = cy_bg + r_tick_start * math.sin(rad)
+                x2 = cx_bg + r_tick_end * math.cos(rad)
+                y2 = cy_bg + r_tick_end * math.sin(rad)
+                bg_draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
+                
+            # Pre-render Gauge Track (inactive - dark background arc)
+            r_arc_bg = 48
+            bbox_bg = [(cx_bg - r_arc_bg, cy_bg - r_arc_bg), (cx_bg + r_arc_bg, cy_bg + r_arc_bg)]
+            bg_draw.arc(bbox_bg, start=180, end=360, fill=(38, 38, 42, 255), width=7)
+            
+            self._cached_base_bg = bg
+            
+        img = self._cached_base_bg.copy()
         draw = ImageDraw.Draw(img)
         
         # 2. Header
@@ -700,41 +751,10 @@ class VolumeControl(ActionBase):
         
         # 3. Dial Geometry (Perfect half-circle layout shifted up to fit within display edges)
         cx, cy = 100, 92
-        
-        # Outer Knob Core radius
         r_outer = 45
-        # Inner Knob Core radius (Thickness = 3px)
         r_inner = 42
-        
-        # Gauge Arc radius
         r_arc = 48
-        
-        # Draw Ticks (broken into quarters - 17 ticks total, every 11.25 degrees)
-        for i in range(17):
-            tick_angle = 180 + i * 11.25
-            rad = math.radians(tick_angle)
-            if i % 4 == 0:
-                # Quarters: longer, thicker lines
-                r_tick_start = 51
-                r_tick_end = 60
-                w = 3
-                color = (160, 162, 175, 255)
-            else:
-                # Smaller lines in between
-                r_tick_start = 55
-                r_tick_end = 59
-                w = 1
-                color = (110, 112, 120, 255)
-                
-            x1 = cx + r_tick_start * math.cos(rad)
-            y1 = cy + r_tick_start * math.sin(rad)
-            x2 = cx + r_tick_end * math.cos(rad)
-            y2 = cy + r_tick_end * math.sin(rad)
-            draw.line([(x1, y1), (x2, y2)], fill=color, width=w)
-            
-        # Draw Gauge Track (inactive - dark background arc)
         bbox = [(cx - r_arc, cy - r_arc), (cx + r_arc, cy + r_arc)]
-        draw.arc(bbox, start=180, end=360, fill=(38, 38, 42, 255), width=7)
         
         # Draw Active Gauge Segments: static volume (dimmed) + live audio peak (fully bright) OR blue volume meter
         if not is_muted:
@@ -744,11 +764,14 @@ class VolumeControl(ActionBase):
             if is_live_enabled:
                 grad_img = self._get_gauge_gradient_image(width, height, bbox)
                 
-                # 1. Dimmed volume level gradient arc (remains 100% visible)
-                vol_mask = Image.new("L", (width, height), 0)
-                vol_mask_draw = ImageDraw.Draw(vol_mask)
-                vol_mask_draw.arc(bbox, start=180, end=360, fill=75, width=7)
-                img.paste(grad_img, (0, 0), vol_mask)
+                # 1. Dimmed volume level gradient arc (remains 100% visible - cached)
+                if self._cached_vol_mask is None:
+                    vol_mask = Image.new("L", (width, height), 0)
+                    vol_mask_draw = ImageDraw.Draw(vol_mask)
+                    vol_mask_draw.arc(bbox, start=180, end=360, fill=75, width=7)
+                    self._cached_vol_mask = vol_mask
+                    
+                img.paste(grad_img, (0, 0), self._cached_vol_mask)
                 
                 # 2. Fully bright audio peak gradient arc bouncing within/up to current volume
                 if peak > 0.04:
