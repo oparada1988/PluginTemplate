@@ -1,8 +1,8 @@
-# Volume Control for Stream Deck Plus
+# Volume Control Plus for StreamController
 <img width="1000" height="360" alt="g31" src="https://github.com/user-attachments/assets/254e6175-572e-4f63-beaa-333d7a278b89" />
 
 
-Official-style Volume Control plugin for Stream Deck Plus. Allows volume adjustment via dials, mute toggle via dial push, and touchscreen drag gestures to mute/unmute the audio.
+Volume Control plugin inspired by the official Elgato Volumen Mixer plugin. Mimics the visual UI for a clean look. Allows volume adjustment via dials, mute toggle via dial push, and touchscreen drag gestures to mute/unmute the audio.
 
 ## Features
 * **Dial Adjustment**: Smoothly turn dials to raise or lower PipeWire volume.
