@@ -10,6 +10,7 @@ import threading
 import time
 import math
 import struct
+import array
 import fcntl
 import select
 from PIL import Image, ImageDraw, ImageFont
@@ -102,12 +103,11 @@ class VolumePeakMonitor:
                     break
                 buf.extend(data)
                 while len(buf) >= chunk_bytes:
-                    chunk = bytes(buf[:chunk_bytes])
+                    chunk = buf[:chunk_bytes]
                     del buf[:chunk_bytes]
 
-                    num_samples = len(chunk) // 2
-                    if num_samples > 0:
-                        samples = struct.unpack(f"<{num_samples}h", chunk)
+                    samples = array.array('h', chunk)
+                    if samples:
                         # High-performance absolute peak calculation using builtins in C
                         max_val = max(samples)
                         min_val = min(samples)
@@ -189,6 +189,8 @@ class VolumeControl(ActionBase):
         self._resolved_font_title = None
         self._peak_hold_val = 0.0
         self._peak_hold_ticks = 0
+        self.poll_timer_id = 0
+        self._event_proc = None
 
     def on_ready(self) -> None:
         self.running = True
@@ -196,10 +198,61 @@ class VolumeControl(ActionBase):
         # Load initial status once (in a background thread to avoid GTK block)
         threading.Thread(target=self._initial_load_status, daemon=True).start()
         
+        # Start persistent event listener for instant volume updates without CPU polling overhead
+        self._start_event_listener()
+        
         # Start GLib tick timer if live peak meter is enabled (increased to 25ms / 40 FPS for premium animation)
         settings = self.get_settings() or {}
         if settings.get("live_meter", True):
             self.tick_timer_id = GLib.timeout_add(25, self.on_tick_update)
+
+    def _start_event_listener(self):
+        threading.Thread(target=self._listen_for_volume_events, daemon=True).start()
+
+    def _listen_for_volume_events(self):
+        use_fallback_polling = True
+        try:
+            proc = subprocess.Popen(
+                ["pactl", "subscribe"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True
+            )
+            self._event_proc = proc
+            use_fallback_polling = False
+        except Exception:
+            pass
+
+        if use_fallback_polling:
+            # Fall back to periodic polling timer
+            GLib.idle_add(self._start_fallback_polling)
+            return
+
+        # Keep reading lines from pactl subscribe
+        while self.running and proc.poll() is None:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            if "change" in line and ("sink" in line or "source" in line):
+                # Trigger a non-blocking read of the volume status
+                if not self._is_polling:
+                    self._is_polling = True
+                    threading.Thread(target=self._poll_system_volume_bg, daemon=True).start()
+
+        if proc.poll() is None:
+            proc.kill()
+
+    def _start_fallback_polling(self):
+        if not self.poll_timer_id and self.running:
+            self.poll_timer_id = GLib.timeout_add(500, self.on_poll_tick)
+
+    def on_poll_tick(self) -> bool:
+        if not self.running:
+            return False
+        if not self._is_polling:
+            self._is_polling = True
+            threading.Thread(target=self._poll_system_volume_bg, daemon=True).start()
+        return True
 
     def _initial_load_status(self):
         settings = self.get_settings() or {}
@@ -227,6 +280,15 @@ class VolumeControl(ActionBase):
         if self.tick_timer_id:
             GLib.source_remove(self.tick_timer_id)
             self.tick_timer_id = 0
+        if self.poll_timer_id:
+            GLib.source_remove(self.poll_timer_id)
+            self.poll_timer_id = 0
+        if self._event_proc:
+            try:
+                self._event_proc.kill()
+            except OSError:
+                pass
+            self._event_proc = None
         self.peak_monitor.stop()
 
     def on_disconnect(self) -> None:
@@ -234,6 +296,15 @@ class VolumeControl(ActionBase):
         if self.tick_timer_id:
             GLib.source_remove(self.tick_timer_id)
             self.tick_timer_id = 0
+        if self.poll_timer_id:
+            GLib.source_remove(self.poll_timer_id)
+            self.poll_timer_id = 0
+        if self._event_proc:
+            try:
+                self._event_proc.kill()
+            except OSError:
+                pass
+            self._event_proc = None
         self.peak_monitor.stop()
 
     def _raw_event_callback(self, event: InputEvent, data: dict = None):
@@ -304,7 +375,7 @@ class VolumeControl(ActionBase):
         if raw_peak >= self._current_peak:
             self._current_peak = raw_peak
         else:
-            self._current_peak = max(raw_peak, self._current_peak * 0.93 - 0.005)
+            self._current_peak = max(raw_peak, self._current_peak * 0.88 - 0.005)
             
         peak = self._current_peak
         if peak < 0.01:
@@ -327,15 +398,6 @@ class VolumeControl(ActionBase):
             (peak == 0.0 and self.last_drawn_peak > 0.0)):
             
             self.update_ui_rendering(peak)
-            
-        # Poll system volume changes at a fixed 500ms interval
-        import time
-        now = time.time()
-        if now - self.last_poll_time >= 0.5:
-            self.last_poll_time = now
-            if not self._is_polling:
-                self._is_polling = True
-                threading.Thread(target=self._poll_system_volume_bg, daemon=True).start()
             
         return True
 
@@ -1121,9 +1183,9 @@ class VolumeControl(ActionBase):
             self.peak_monitor.stop()
         else:
             self.restart_peak_monitor()
-            # Start timer at 20 FPS (50ms interval)
+            # Start timer at 40 FPS (25ms interval) for premium animation
             if not self.tick_timer_id and self.running:
-                self.tick_timer_id = GLib.timeout_add(50, self.on_tick_update)
+                self.tick_timer_id = GLib.timeout_add(25, self.on_tick_update)
                 
         self.update_ui_rendering(force=True)
 
